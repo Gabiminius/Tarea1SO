@@ -69,6 +69,10 @@ int main() {
             }
             continue; // no usar fork para cd
         }
+        if (parse_command[0] == "wc" && parse_command.size() == 1) {
+    cerr << RED << "wc: debe especificar un archivo" << RESET << endl;
+    continue; // Volver al prompt sin ejecutar fork
+}
 
         //comandos externos (ls, wc)
         pid_t pid = fork();
@@ -96,4 +100,5 @@ int main() {
 
     return 0;
 }
+
 
