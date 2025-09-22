@@ -5,6 +5,7 @@
 #include <pwd.h>
 #include <sys/wait.h>
 #include <vector>
+#include <array> 
 
 #define RESET   "\033[0m"
 #define GREEN   "\033[32m"  // color prompt
@@ -14,6 +15,26 @@ using namespace std;
 
 const int num_commands = 4;
 const string commands[num_commands] = {"ls", "cd", "wc", "exit"};
+
+// Función para separar un comando por pipes 
+vector<vector<string>> separadoPorPipes(const vector<string>& parse_command) {
+    vector<vector<string>> result;
+    vector<string> current;
+
+    for (const auto& word : parse_command) {
+        if (word == "|") {
+            if (!current.empty()) {
+                result.push_back(current);
+                current.clear();
+            }
+        } else {
+            current.push_back(word);
+        }
+    }
+    if (!current.empty()) result.push_back(current);
+
+    return result;
+}
 
 int main() {
     while (true) {
@@ -46,7 +67,7 @@ int main() {
             }
         }
 
-        if (!isCorrect) {
+        if (!isCorrect && parse_command[0] != "|") {
             string bad_command;
             for (size_t i = 0; i < parse_command.size(); i++) {
                 bad_command += parse_command[i];
@@ -70,18 +91,69 @@ int main() {
             continue; // no usar fork para cd
         }
         if (parse_command[0] == "wc" && parse_command.size() == 1) {
-    cerr << RED << "wc: debe especificar un archivo" << RESET << endl;
-    continue; // Volver al prompt sin ejecutar fork
-}
+            cerr << RED << "wc: debe especificar un archivo" << RESET << endl;
+            continue; // Volver al prompt sin ejecutar fork
+        }
 
-        //comandos externos (ls, wc)
+        // Manejo de pipes 
+
+        // Si el comando tiene '|', lo dividimos y conectamos cada subcomando con pipes
+        vector<vector<string>> commands_pipe = separadoPorPipes(parse_command);
+        int num_cmds = commands_pipe.size();
+
+        // Crear pipes
+        if (num_cmds > 1) {
+            vector<array<int, 2>> pipes(num_cmds - 1);
+            for (int i = 0; i < num_cmds - 1; i++) {
+                if (pipe(pipes[i].data()) == -1) {
+                    perror("pipe");
+                    exit(EXIT_FAILURE);
+                }
+            }
+            // Crear un proceso hijo por cada subcomando
+            for (int i = 0; i < num_cmds; i++) {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    if (i > 0) dup2(pipes[i-1][0], STDIN_FILENO);
+                    if (i < num_cmds - 1) dup2(pipes[i][1], STDOUT_FILENO);
+                    // Cerrar todos los pipes en el hijo
+                    for (int j = 0; j < num_cmds - 1; j++) {
+                        close(pipes[j][0]);
+                        close(pipes[j][1]);
+                    }
+
+                    vector<char*> args;
+                    for (auto &s : commands_pipe[i])
+                        args.push_back(const_cast<char*>(s.c_str()));
+                    args.push_back(nullptr);
+
+                    execvp(args[0], args.data());
+                    perror("execvp"); // error al ejecutar comando
+                    exit(EXIT_FAILURE);
+                } else if (pid < 0) {
+                    perror("fork"); // error al crear hijo
+                    exit(EXIT_FAILURE);
+                }
+            }
+            // Padre cierra todos los pipes y espera a todos los hijos
+            for (int i = 0; i < num_cmds - 1; i++) {
+                close(pipes[i][0]);
+                close(pipes[i][1]);
+            }
+
+            for (int i = 0; i < num_cmds; i++)
+                wait(NULL);
+
+            continue;
+        }
+
+        //comandos externos sin pipe (ls, wc)
         pid_t pid = fork();
         if (pid == 0) {
             // proceso hijo → ejecutar comando
             vector<char*> args;
-            for (auto &s : parse_command) {
+            for (auto &s : parse_command)
                 args.push_back(const_cast<char*>(s.c_str()));
-            }
             args.push_back(nullptr);
 
             if (execvp(args[0], args.data()) < 0) {
