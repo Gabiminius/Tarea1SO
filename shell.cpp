@@ -13,6 +13,15 @@
 
 using namespace std;
 
+//utilidad miprof
+static pid_t g_child = -1;
+
+void kill_child(int) {
+    if(g_child > 0){
+        kill(g_child, SIGKILL);
+    }
+}
+
 // Función para separar un comando por pipes 
 vector<vector<string>> separadoPorPipes(const vector<string>& parse_command) {
     vector<vector<string>> result;
@@ -57,7 +66,7 @@ int main() {
 
         //comandos internos
         if (parse_command[0] == "exit") {
-            cout << "Saliendo de la MirkoShell..." << endl;
+            cout << "Saliendo de la MirkoShell ᓚᘏᗢ..." << endl;
             exit(0);
         }
         else if (parse_command[0] == "cd") {
@@ -69,8 +78,61 @@ int main() {
             continue; // no usar fork para cd
         }
         else if (parse_command[0] == "wc" && parse_command.size() == 1) {
-            cerr << RED << "wc: debe especificar un archivo" << RESET << endl;
+            std::cerr << RED << "wc: debe especificar un archivo" << RESET << endl;
             continue; 
+        }
+        else if(parse_command[0] == "miprof"){
+            if(parse_command.size() < 3){
+                std::cerr << RED << "miprof: se requieren al menos dos argumentos" << RESET << endl;
+                continue;
+            }
+            string modo = parse_command[1];
+            int idx_cmd = -1;
+            int maxTiempo = 0;
+            string archivo;
+
+            if(modo == "ejec"){
+                idx_cmd = 2;
+            }else if(modo == "ejecsave"){
+                if(parse_command.size() < 4){
+                    std::cerr << RED << "Falta archivo.\n" << RESET;
+                    continue;
+                }
+                archivo = parse_command[2];
+                idx_cmd = 3;
+            }else if (modo == "ejecutar"){
+                if(parse_command.size() < 4){
+                    std::cerr << RED << "Falta maxTiempo y comando.\n" << RESET;
+                    continue;
+                }
+                maxTiempo = stoi(parse_command[2]);
+                idx_cmd = 3;
+            }else {
+                std::cerr << RED << "miprof: modo no reconocido" << RESET <<endl;
+                continue;
+            }
+
+            //construccion argv
+            vector<char*> args;
+            for (size_t i = idx_cmd; i < parse_command.size(); i++)
+                args.push_back(const_cast<char*>(parse_command[i].c_str()));
+            args.push_back(nullptr);
+
+            timespec t0{}, t1{};
+            clock_gettime(CLOCK_MONOTONIC, &t0); //toma tiempo inicio
+
+            //timeout
+            struct sigaction sa{};
+            if(modo =="ejecutar"){
+                sa.sa_handler = kill_child;
+                sigemptyset(&sa.sa_mask);
+                sa.sa_flags = SA_RESTART;
+                sigaction(SIGINT, &sa, nullptr);
+                alarm(maxTiempo);
+            }
+
+            //falta ejecutar, tomar tiempo real, imprimir la salida, guardar archivo si es ejecsave
+            
         }
 
         //manejo de pipes
@@ -101,7 +163,7 @@ int main() {
                     args.push_back(nullptr);
 
                     execvp(args[0], args.data());
-                    cerr << RED << args[0] << ": comando no encontrado" << RESET << endl;
+                    std::cerr << RED << args[0] << ": comando no encontrado" << RESET << endl;
                     exit(EXIT_FAILURE);
                 } else if (pid < 0) {
                     perror("fork");
@@ -125,7 +187,7 @@ int main() {
             args.push_back(nullptr);
 
             execvp(args[0], args.data());
-            cerr << RED << args[0] << ": comando no encontrado" << RESET << endl;
+            std::cerr << RED << args[0] << ": comando no encontrado" << RESET << endl;
             exit(EXIT_FAILURE);
         }
         else if (pid > 0) {
