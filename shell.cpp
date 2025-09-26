@@ -6,6 +6,10 @@
 #include <sys/wait.h>
 #include <vector>
 #include <array>
+#include <sys/resource.h>
+#include <fstream>
+#include <signal.h> 
+#include <time.h>   
 
 #define RESET   "\033[0m"
 #define GREEN   "\033[32m"  // color prompt
@@ -81,6 +85,20 @@ int main() {
             std::cerr << RED << "wc: debe especificar un archivo" << RESET << endl;
             continue; 
         }
+        /*
+            * Implementación del comando miprof
+            * Modos:
+            *  miprof ejec <comando> [args...] 
+            *  miprof ejecsave <archivo> <comando> [args...]
+            *  miprof ejecutar <maxTiempo> <comando> [args...]
+            *  Reporta:
+            *   - Tiempo real
+            *   - Tiempo usuario
+            *   - Tiempo sistema
+            *   - Máxima memoria residente
+            *  En modo ejecutar, si el proceso excede maxTiempo, se termina y se indica en el reporte
+            *  En modo ejecsave, el reporte se guarda en el archivo especificado
+        */
         else if(parse_command[0] == "miprof"){
             if(parse_command.size() < 3){
                 std::cerr << RED << "miprof: se requieren al menos dos argumentos" << RESET << endl;
@@ -127,13 +145,68 @@ int main() {
                 sa.sa_handler = kill_child;
                 sigemptyset(&sa.sa_mask);
                 sa.sa_flags = SA_RESTART;
-                sigaction(SIGINT, &sa, nullptr);
+                sigaction(SIGALRM, &sa, nullptr);
                 alarm(maxTiempo);
             }
 
-            //falta ejecutar, tomar tiempo real, imprimir la salida, guardar archivo si es ejecsave
-            
+            pid_t pid = fork();
+            if (pid == 0) {
+                execvp(args[0], args.data());
+                perror("execvp");
+                exit(EXIT_FAILURE);
+            }else if (pid < 0) {
+                perror("fork");
+                continue;
+            }
+            g_child = pid;
+
+            int status;
+            rusage ru{};
+            wait4(pid, &status, 0, &ru);
+            if(modo == "ejecutar"){
+                alarm(0);
+            }
+
+            //tiempo fin
+            clock_gettime(CLOCK_MONOTONIC, &t1); 
+            double tiempoReal = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
+            double tiempoUsuario = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6;
+            double tiempoSistema = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6;
+            long maxMemoria = ru.ru_maxrss; 
+
+            //crear reporte
+            ostringstream output;
+            output << "Comando:";
+            for (size_t i = idx_cmd; i < parse_command.size(); i++){
+                output << " " << parse_command[i];
+            }
+            output << "\nTiempo real: " << tiempoReal << " s"
+                   << "\nTiempo usuario: " << tiempoUsuario << " s"
+                   << "\nTiempo sistema: " << tiempoSistema << " s"
+                   << "\nMax memoria: " << maxMemoria << " kB";
+
+            if(modo == "ejecutar" && !(WIFEXITED(status))){
+                output << "\nProceso terminado: Timeout (" << maxTiempo << " s)";
+            }
+            string reporte = output.str();
+            //guardar reporte en archivo
+            if(modo == "ejecsave"){
+                ofstream out(archivo, ios::app);
+                if(!out){
+                    perror("miprof: error al abrir archivo");
+                    continue;
+                }
+                out << "\n\n" << reporte << "\n\n";
+            }
+            //imprimir reporte
+            std::cout << reporte << std::endl;
+            continue;
         }
+        /*
+            -------------------------------------------------------------------------------------------------
+                                                        Fin miprof
+            -------------------------------------------------------------------------------------------------
+        */
 
         //manejo de pipes
         vector<vector<string>> commands_pipe = separadoPorPipes(parse_command);
