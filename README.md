@@ -1,6 +1,6 @@
 # Tarea 1: Sistemas Operativos
 ## Compilación
-Para la compilacion del archivo **shell.cpp** se debe realizar el siguiente comando.
+Para la compilación del archivo **shell.cpp** se debe realizar el siguiente comando.
 ```
 g++ shell.cpp -o shell
 
